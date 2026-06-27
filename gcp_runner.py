@@ -410,7 +410,7 @@ async def cmd_runstartup(_, msg: Message):
     await run_on_gcp("chmod +x ~/startup.sh", timeout=15)
     
     # Run in background on GCP using nohup so it stays alive even if we disconnect!
-    output = await run_on_gcp("nohup bash ~/startup.sh > ~/startup.log 2>&1 & echo 'Launched in background!'", timeout=30)
+    output = await run_on_gcp("nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 & echo 'Launched in background!'", timeout=30)
     await wait_msg.edit_text(f"✅ **Startup Launched:**\n`{output}`\nCheck log output anytime by typing `cat ~/startup.log`.")
 
 # ── TERMINAL: Any other text = shell command ─
@@ -478,7 +478,7 @@ async def startup_daemon(app: Client):
             # Run startup sequence
             uploaded = await upload_startup_script()
             if uploaded:
-                await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh > ~/startup.log 2>&1 &", timeout=30)
+                await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 &", timeout=30)
                 startup_running = True
             else:
                 log.error("Failed to upload startup script. Will retry next check.")
