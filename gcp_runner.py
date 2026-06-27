@@ -30,7 +30,11 @@ from hydrogram.types import Message
 API_ID    = int(os.environ.get("API_ID",    "27686895"))
 API_HASH  = os.environ.get("API_HASH",       "0e996bd3891969ec5dfebf8bb3e39e94")
 BOT_TOKEN = os.environ.get("BOT_TOKEN",      "8615130694:AAF5Y29rp3_pmtHj5dgqS4picI03Kx6Uvxo")
-ADMIN     = int(os.environ.get("ADMIN",      "1246987713"))
+ADMIN_RAW = os.environ.get("ADMIN", "1246987713")
+try:
+    ADMIN = int(ADMIN_RAW)
+except ValueError:
+    ADMIN = ADMIN_RAW
 
 # Path to store startup commands on the VPS
 STARTUP_FILE = os.path.abspath("startup_commands.txt")
