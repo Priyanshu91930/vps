@@ -130,7 +130,7 @@ async def upload_startup_script() -> bool:
     """Uploads the startup script to GCP Cloud Shell via gcloud SCP."""
     scp_cmd = [
         "gcloud", "cloud-shell", "scp",
-        f"localhost:{STARTUP_FILE}",
+        STARTUP_FILE,
         "cloudshell:~/startup.sh",
         "--quiet"
     ]
