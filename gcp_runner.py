@@ -21,7 +21,7 @@ import sys
 import time
 import logging
 import urllib.request
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 
 # ─────────────────────────────────────────────
@@ -215,7 +215,7 @@ async def cmd_start(_, msg: Message):
         "`/connect`  — Connect to GCP Cloud Shell\n"
         "`/status`   — Connection & status check\n"
         "`/specs`    — VPS & GCP CPU/RAM/Disk/Speed specifications\n"
-        "`/bots`     — List running Python scripts on VPS and GCP\n"
+        "`/bots`     — List running Python/Docker processes\n"
         "`/storage`  — Show disk usage (`df -h`)\n"
         "`/ls`       — List home directory files\n"
         "`/kill`     — Kill all Python processes on GCP\n"
@@ -386,6 +386,7 @@ async def cmd_setstartup(_, msg: Message):
 @app.on_message(filters.command("runstartup") & filters.user(ADMIN))
 async def cmd_runstartup(_, msg: Message):
     wait_msg = await msg.reply_text("⚡ Manually launching startup sequence on GCP...")
+    
     # Upload the script via SCP
     uploaded = await upload_startup_script()
     if not uploaded:
@@ -525,7 +526,7 @@ async def main():
         asyncio.create_task(heartbeat_alert_daemon(app))
         
         log.info("Bot is running. Waiting for Telegram messages...")
-        await asyncio.get_event_loop().create_future()  # run forever
+        await idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
