@@ -433,7 +433,11 @@ async def startup_daemon(app: Client):
         if not alive:
             gcp_connected = False
             startup_running = False
-            log.info("GCP Offline. Attempting to wake it up and run startup commands...")
+            
+            # Probe it once and get the actual error output to show in log
+            err_check = await run_on_gcp("echo __alive__", timeout=30)
+            log.info(f"GCP Offline. Connection check output/error: {err_check}")
+            log.info("Attempting to wake it up...")
             
             # Executing a simple command automatically boots Cloud Shell
             await run_on_gcp("echo waking_up", timeout=90)
