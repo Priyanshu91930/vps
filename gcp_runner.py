@@ -127,7 +127,7 @@ async def run_on_gcp(cmd: str, timeout: int = 60) -> str:
         return f"❌ Exception: {e}"
 
 async def upload_startup_script() -> bool:
-    """Uploads the startup script to GCP Cloud Shell via gcloud SCP."""
+    """Uploads the startup script to GCP Cloud Shell via gcloud SCP with timeout and logs."""
     scp_cmd = [
         "gcloud", "cloud-shell", "scp",
         STARTUP_FILE,
@@ -140,10 +140,24 @@ async def upload_startup_script() -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await proc.wait()
-        return proc.returncode == 0
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=30
+            )
+            out = stdout.decode("utf-8", errors="replace").strip()
+            err = stderr.decode("utf-8", errors="replace").strip()
+            if proc.returncode == 0:
+                log.info("[SCP] Startup script uploaded successfully to GCP.")
+                return True
+            else:
+                log.error(f"[SCP] Failed to upload. Exit code {proc.returncode}. Out: {out} | Err: {err}")
+                return False
+        except asyncio.TimeoutError:
+            proc.kill()
+            log.error("[SCP] Command timed out after 30s.")
+            return False
     except Exception as e:
-        log.error(f"Failed to upload startup script via SCP: {e}")
+        log.error(f"[SCP] Exception during upload: {e}")
         return False
 
 async def check_gcp_alive() -> bool:
@@ -462,9 +476,12 @@ async def startup_daemon(app: Client):
             log.info("GCP Online. Executing startup commands...")
             
             # Run startup sequence
-            await upload_startup_script()
-            await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh > ~/startup.log 2>&1 &", timeout=30)
-            startup_running = True
+            uploaded = await upload_startup_script()
+            if uploaded:
+                await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh > ~/startup.log 2>&1 &", timeout=30)
+                startup_running = True
+            else:
+                log.error("Failed to upload startup script. Will retry next check.")
         
         # Periodic check loop
         await asyncio.sleep(HEARTBEAT_INTERVAL)
