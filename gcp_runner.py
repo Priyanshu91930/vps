@@ -33,7 +33,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN",      "8615130694:AAF5Y29rp3_pmtHj5dgqS4p
 ADMIN     = int(os.environ.get("ADMIN",      "1246987713"))
 
 # Path to store startup commands on the VPS
-STARTUP_FILE = "startup_commands.txt"
+STARTUP_FILE = os.path.abspath("startup_commands.txt")
 # Heartbeat interval for connection check (seconds)
 HEARTBEAT_INTERVAL = 30 
 # Keepalive interval to prevent inactivity timeout (seconds)
