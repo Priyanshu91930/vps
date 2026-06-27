@@ -519,6 +519,13 @@ async def heartbeat_alert_daemon(app: Client):
 # ─────────────────────────────────────────────
 async def main():
     async with app:
+        log.info("Clearing active webhook if any...")
+        try:
+            await app.delete_webhook()
+            log.info("Webhook cleared successfully!")
+        except Exception as e:
+            log.warning(f"Could not clear webhook: {e}")
+
         log.info("Starting background tasks...")
         # Start all tasks in background
         asyncio.create_task(startup_daemon(app))
