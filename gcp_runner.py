@@ -23,6 +23,7 @@ import logging
 import urllib.request
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message
+from pyrogram.handlers import MessageHandler
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION
@@ -62,6 +63,7 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 gcp_connected = False   # whether GCP Cloud Shell is connected
 startup_running = False # whether startup script is executing/active
+app = None              # Will be initialized inside main()
 
 # Default startup commands requested by the user
 DEFAULT_STARTUP = (
@@ -179,10 +181,10 @@ def split_output(text: str) -> list[str]:
         chunks.append(text)
     return chunks
 
-async def send_alert(app: Client, text: str):
+async def send_alert(client: Client, text: str):
     """Sends notification to the ADMIN."""
     try:
-        await app.send_message(ADMIN, text)
+        await client.send_message(ADMIN, text)
     except Exception as e:
         log.error(f"Failed to send alert: {e}")
 
@@ -205,26 +207,13 @@ def test_vps_download_speed() -> str:
             pass
 
 # ─────────────────────────────────────────────
-#  TELEGRAM BOT CLIENT
+#  TELEGRAM BOT HANDLERS
 # ─────────────────────────────────────────────
-app = Client(
-    "gcp_terminal_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-)
-
-# ─────────────────────────────────────────────
-#  GLOBAL DEBUG LOGGER
-# ─────────────────────────────────────────────
-@app.on_message(group=-1)
 async def debug_log_messages(_, msg: Message):
     sender_id = msg.from_user.id if msg.from_user else "Unknown"
     log.info(f"📥 [TELEGRAM] Message received from User ID: {sender_id} | Text: {msg.text}")
     log.info(f"⚙️ [CONFIG] Configured ADMIN ID is: {ADMIN}")
 
-# ── /start ──────────────────────────────────
-@app.on_message(filters.command("start") & filters.user(ADMIN))
 async def cmd_start(_, msg: Message):
     await msg.reply_text(
         "🖥️ **GCP Cloud Shell Terminal (Owner Panel)**\n\n"
@@ -245,8 +234,6 @@ async def cmd_start(_, msg: Message):
         "Everything else you type → runs directly on GCP Shell 🚀"
     )
 
-# ── /connect ────────────────────────────────
-@app.on_message(filters.command("connect") & filters.user(ADMIN))
 async def cmd_connect(_, msg: Message):
     global gcp_connected
     wait_msg = await msg.reply_text("🔌 Connecting to GCP Cloud Shell...")
@@ -258,8 +245,6 @@ async def cmd_connect(_, msg: Message):
         gcp_connected = False
         await wait_msg.edit_text("❌ Could not connect to GCP Cloud Shell.\nMake sure `gcloud auth login` was done on this VPS.")
 
-# ── /status ─────────────────────────────────
-@app.on_message(filters.command("status") & filters.user(ADMIN))
 async def cmd_status(_, msg: Message):
     global gcp_connected, startup_running
     wait_msg = await msg.reply_text("🔍 Checking status...")
@@ -275,8 +260,6 @@ async def cmd_status(_, msg: Message):
         f"🕒 Checked at: `{time.strftime('%H:%M:%S')}`"
     )
 
-# ── /specs ──────────────────────────────────
-@app.on_message(filters.command("specs") & filters.user(ADMIN))
 async def cmd_specs(_, msg: Message):
     wait_msg = await msg.reply_text("📊 Gathering specifications (VPS & GCP) + running speed tests...")
     
@@ -321,8 +304,6 @@ async def cmd_specs(_, msg: Message):
     )
     await wait_msg.edit_text(report)
 
-# ── /bots ───────────────────────────────────
-@app.on_message(filters.command("bots") & filters.user(ADMIN))
 async def cmd_bots(_, msg: Message):
     wait_msg = await msg.reply_text("🤖 Scanning active Python/Docker containers...")
     
@@ -355,30 +336,22 @@ async def cmd_bots(_, msg: Message):
     )
     await wait_msg.edit_text(report)
 
-# ── /storage ────────────────────────────────
-@app.on_message(filters.command("storage") & filters.user(ADMIN))
 async def cmd_storage(_, msg: Message):
     wait_msg = await msg.reply_text("📦 Fetching storage info...")
     output = await run_on_gcp("df -h", timeout=30)
     await wait_msg.edit_text(f"**💾 GCP Cloud Shell Storage:**\n```\n{output}\n```")
 
-# ── /ls ─────────────────────────────────────
-@app.on_message(filters.command("ls") & filters.user(ADMIN))
 async def cmd_ls(_, msg: Message):
     wait_msg = await msg.reply_text("📂 Listing files...")
     output = await run_on_gcp("ls -lah ~/", timeout=30)
     await wait_msg.edit_text(f"**📂 GCP Home Directory:**\n```\n{output}\n```")
 
-# ── /kill ───────────────────────────────────
-@app.on_message(filters.command("kill") & filters.user(ADMIN))
 async def cmd_kill(_, msg: Message):
     wait_msg = await msg.reply_text("🔴 Stopping Docker containers & killing Python scripts on GCP...")
     docker_kill = await run_on_gcp("docker stop $(docker ps -a -q) &>/dev/null; docker rm $(docker ps -a -q) &>/dev/null", timeout=30)
     pkill = await run_on_gcp("pkill -f python3; echo 'Done'", timeout=30)
     await wait_msg.edit_text(f"🔴 **Stop Result:**\nContainers stopped.\nPython processes killed:\n```\n{pkill}\n```")
 
-# ── /viewstartup ────────────────────────────
-@app.on_message(filters.command("viewstartup") & filters.user(ADMIN))
 async def cmd_viewstartup(_, msg: Message):
     cmds = load_startup_commands()
     await msg.reply_text(
@@ -387,99 +360,62 @@ async def cmd_viewstartup(_, msg: Message):
         f"Use `/setstartup <commands>` to edit."
     )
 
-# ── /setstartup ─────────────────────────────
-@app.on_message(filters.command("setstartup") & filters.user(ADMIN))
 async def cmd_setstartup(_, msg: Message):
-    # Retrieve commands from command arguments
     if len(msg.command) < 2:
         await msg.reply_text("❌ Please provide commands. Usage: `/setstartup cd ~/bot && git pull && ...`")
         return
-    
-    # Grab everything after the command
     new_cmds = msg.text.split(None, 1)[1]
     save_startup_commands(new_cmds)
     await msg.reply_text("✅ **Auto-Startup Commands saved successfully!**\nThese will execute automatically on reconnect/startup.")
 
-# ── /runstartup ─────────────────────────────
-@app.on_message(filters.command("runstartup") & filters.user(ADMIN))
 async def cmd_runstartup(_, msg: Message):
     wait_msg = await msg.reply_text("⚡ Manually launching startup sequence on GCP...")
-    
-    # Upload the script via SCP
     uploaded = await upload_startup_script()
     if not uploaded:
         await wait_msg.edit_text("❌ Failed to upload startup script to GCP Cloud Shell.")
         return
-        
     await run_on_gcp("chmod +x ~/startup.sh", timeout=15)
-    
-    # Run in background on GCP using nohup so it stays alive even if we disconnect!
     output = await run_on_gcp("nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 & echo 'Launched in background!'", timeout=30)
     await wait_msg.edit_text(f"✅ **Startup Launched:**\n`{output}`\nCheck log output anytime by typing `cat ~/startup.log`.")
 
-# ── TERMINAL: Any other text = shell command ─
-@app.on_message(filters.text & filters.user(ADMIN) & ~filters.command(
-    ["start", "help", "connect", "status", "specs", "bots", "storage", "ls", "kill", "viewstartup", "setstartup", "runstartup"]
-))
 async def terminal(_, msg: Message):
     user_cmd = msg.text.strip()
     if not user_cmd:
         return
-
     wait_msg = await msg.reply_text(f"⚡ Running: `{user_cmd}`")
     output = await run_on_gcp(user_cmd, timeout=120)
     chunks = split_output(output)
-    
     if not chunks:
         await wait_msg.edit_text("✅ Command executed. (no output)")
         return
-
     first = f"```\n{chunks[0]}\n```"
     await wait_msg.edit_text(first)
-
     for chunk in chunks[1:]:
         await msg.reply_text(f"```\n{chunk}\n```")
-
 
 # ─────────────────────────────────────────────
 #  DAEMON: Auto-Reconnection & Startup Executor
 # ─────────────────────────────────────────────
-async def startup_daemon(app: Client):
-    """
-    Monitors GCP connection.
-    If GCP is disconnected/reconnected, it automatically wakes it up
-    and executes the saved startup commands to rebuild/restart the docker bot.
-    """
+async def startup_daemon(client: Client):
     global gcp_connected, startup_running
     log.info("Startup Daemon task started.")
     await asyncio.sleep(5) 
 
     while True:
-        # Check connection state
         alive = await check_gcp_alive()
-        
         if not alive:
             gcp_connected = False
             startup_running = False
-            
-            # Probe it once and get the actual error output to show in log
             err_check = await run_on_gcp("echo __alive__", timeout=30)
             log.info(f"GCP Offline. Connection check output/error: {err_check}")
             log.info("Attempting to wake it up...")
-            
-            # Executing a simple command automatically boots Cloud Shell
             await run_on_gcp("echo waking_up", timeout=90)
-            
-            # Let it boot up
             await asyncio.sleep(15)
             continue
         
-        # Determine if we need to run startup scripts
         if alive and not startup_running:
             gcp_connected = True
             log.info("GCP Online. Executing startup commands...")
-            
-            # Run startup sequence
             uploaded = await upload_startup_script()
             if uploaded:
                 await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 &", timeout=30)
@@ -487,60 +423,79 @@ async def startup_daemon(app: Client):
             else:
                 log.error("Failed to upload startup script. Will retry next check.")
         
-        # Periodic check loop
         await asyncio.sleep(HEARTBEAT_INTERVAL)
 
 # ─────────────────────────────────────────────
 #  DAEMON: 1-Hour Inactivity Prevention (Keepalive)
 # ─────────────────────────────────────────────
-async def keepalive_daemon(app: Client):
-    """
-    Bypasses the 1-hour inactivity timeout of GCP Cloud Shell by
-    periodically executing a dummy command to simulate continuous activity.
-    """
+async def keepalive_daemon(client: Client):
     log.info("Keepalive Daemon task started.")
     while True:
         await asyncio.sleep(KEEPALIVE_INTERVAL)
         if gcp_connected:
-            # Send small write/read command to signal user activity on VM
             log.info("Sending keep-alive ping to GCP Cloud Shell...")
             await run_on_gcp("echo keepalive > /dev/null", timeout=15)
 
 # ─────────────────────────────────────────────
 #  HEARTBEAT: Disconnect Alert Task
 # ─────────────────────────────────────────────
-async def heartbeat_alert_daemon(app: Client):
-    """
-    Background loop that detects connection status changes and immediately
-    sends alert messages to the Telegram ADMIN.
-    """
+async def heartbeat_alert_daemon(client: Client):
     global gcp_connected
     prev_state = False
     
-    # Send startup message
-    await send_alert(app, 
+    await send_alert(client, 
         "🤖 **GCP Terminal Bot is online on VPS!**\n"
         "Monitoring GCP Cloud Shell connection..."
     )
 
     while True:
-        await asyncio.sleep(5) # Fast 5-second check
-        
-        alive = gcp_connected # get state updated by startup_daemon
-        
+        await asyncio.sleep(5)
+        alive = gcp_connected
         if alive and not prev_state:
-            await send_alert(app, "✅ **GCP Cloud Shell session has been established/restored!**")
+            await send_alert(client, "✅ **GCP Cloud Shell session has been established/restored!**")
             prev_state = True
         elif not alive and prev_state:
-            await send_alert(app, "❌ **GCP Cloud Shell connection dropped (12-hour reset or network drop).** Auto-reconnecting...")
+            await send_alert(client, "❌ **GCP Cloud Shell connection dropped (12-hour reset or network drop).** Auto-reconnecting...")
             prev_state = False
 
 # ─────────────────────────────────────────────
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────
 async def main():
-    # Ensure the startup commands file is created on the VPS before any daemon starts!
+    global app
     load_startup_commands()
+
+    # Initialize client dynamically within the active asyncio event loop
+    app = Client(
+        "gcp_terminal_bot",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        bot_token=BOT_TOKEN
+    )
+
+    # Register handlers programmatically to guarantee correct loop binding
+    app.add_handler(MessageHandler(debug_log_messages), group=-1)
+    
+    # commands filter
+    app.add_handler(MessageHandler(cmd_start, filters.command("start") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_connect, filters.command("connect") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_status, filters.command("status") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_specs, filters.command("specs") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_bots, filters.command("bots") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_storage, filters.command("storage") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_ls, filters.command("ls") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_kill, filters.command("kill") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_viewstartup, filters.command("viewstartup") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_setstartup, filters.command("setstartup") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_runstartup, filters.command("runstartup") & filters.user(ADMIN)))
+    
+    # terminal filter (all other text from owner)
+    app.add_handler(MessageHandler(
+        terminal, 
+        filters.text & filters.user(ADMIN) & ~filters.command(
+            ["start", "help", "connect", "status", "specs", "bots", "storage", "ls", "kill", "viewstartup", "setstartup", "runstartup"]
+        )
+    ))
 
     try:
         async with app:
@@ -562,7 +517,6 @@ async def main():
     except (KeyboardInterrupt, asyncio.CancelledError):
         log.info("Stop signal received. Gracefully exiting...")
     except RuntimeError as e:
-        # Suppress Python 3.13 event loop stop mismatch warnings during exit
         if "attached to a different loop" not in str(e):
             raise
 
