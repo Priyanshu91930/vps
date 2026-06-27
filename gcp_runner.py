@@ -21,8 +21,8 @@ import sys
 import time
 import logging
 import urllib.request
-from hydrogram import Client, filters, idle
-from hydrogram.types import Message
+from pyrogram import Client, filters, idle
+from pyrogram.types import Message
 
 # ─────────────────────────────────────────────
 #  CONFIGURATION
