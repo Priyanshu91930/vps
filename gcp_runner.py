@@ -196,6 +196,15 @@ app = Client(
     bot_token=BOT_TOKEN,
 )
 
+# ─────────────────────────────────────────────
+#  GLOBAL DEBUG LOGGER
+# ─────────────────────────────────────────────
+@app.on_message(filters.all, group=-1)
+async def debug_log_messages(_, msg: Message):
+    sender_id = msg.from_user.id if msg.from_user else "Unknown"
+    log.info(f"📥 [TELEGRAM] Message received from User ID: {sender_id} | Text: {msg.text}")
+    log.info(f"⚙️ [CONFIG] Configured ADMIN ID is: {ADMIN}")
+
 # ── /start ──────────────────────────────────
 @app.on_message(filters.command("start") & filters.user(ADMIN))
 async def cmd_start(_, msg: Message):
