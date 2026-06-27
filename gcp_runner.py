@@ -542,22 +542,32 @@ async def main():
     # Ensure the startup commands file is created on the VPS before any daemon starts!
     load_startup_commands()
 
-    async with app:
-        log.info("Clearing active webhook if any...")
-        try:
-            await app.delete_webhook()
-            log.info("Webhook cleared successfully!")
-        except Exception as e:
-            log.warning(f"Could not clear webhook: {e}")
+    try:
+        async with app:
+            log.info("Clearing active webhook if any...")
+            try:
+                await app.delete_webhook()
+                log.info("Webhook cleared successfully!")
+            except Exception as e:
+                log.warning(f"Could not clear webhook: {e}")
 
-        log.info("Starting background tasks...")
-        # Start all tasks in background
-        asyncio.create_task(startup_daemon(app))
-        asyncio.create_task(keepalive_daemon(app))
-        asyncio.create_task(heartbeat_alert_daemon(app))
-        
-        log.info("Bot is running. Waiting for Telegram messages...")
-        await idle()
+            log.info("Starting background tasks...")
+            # Start all tasks in background
+            asyncio.create_task(startup_daemon(app))
+            asyncio.create_task(keepalive_daemon(app))
+            asyncio.create_task(heartbeat_alert_daemon(app))
+            
+            log.info("Bot is running. Waiting for Telegram messages...")
+            await idle()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        log.info("Stop signal received. Gracefully exiting...")
+    except RuntimeError as e:
+        # Suppress Python 3.13 event loop stop mismatch warnings during exit
+        if "attached to a different loop" not in str(e):
+            raise
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
