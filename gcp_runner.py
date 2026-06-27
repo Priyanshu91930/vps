@@ -130,7 +130,7 @@ async def upload_startup_script() -> bool:
     """Uploads the startup script to GCP Cloud Shell via gcloud SCP with timeout and logs."""
     scp_cmd = [
         "gcloud", "cloud-shell", "scp",
-        f"localhost:{STARTUP_FILE}",
+        STARTUP_FILE,
         "cloudshell:~/startup.sh",
         "--quiet"
     ]
@@ -535,6 +535,9 @@ async def heartbeat_alert_daemon(app: Client):
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────
 async def main():
+    # Ensure the startup commands file is created on the VPS before any daemon starts!
+    load_startup_commands()
+
     async with app:
         log.info("Clearing active webhook if any...")
         try:
