@@ -435,19 +435,23 @@ async def startup_daemon(client: Client):
         
         gcp_connected = True
         
-        # Check if our Python processes are running on GCP
-        running_processes = await run_on_gcp("ps -ef | grep python3", timeout=20)
+        # Check if our processes are running on GCP
+        running_processes = await run_on_gcp("ps -ef", timeout=20)
         anihub_running = "anihubfilter" in running_processes
         renamer_running = "renamer2gb" in running_processes
+        setup_running = "pip3" in running_processes or "startup.sh" in running_processes
         
         if not (anihub_running and renamer_running):
-            log.info(f"GCP Online but bots are not running (anihub: {anihub_running}, renamer: {renamer_running}). Executing startup commands...")
-            uploaded = await upload_startup_script()
-            if uploaded:
-                await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 &", timeout=30)
-                startup_running = True
+            if setup_running:
+                log.info("GCP Online. Bots are not running yet, but setup/installation (pip3/startup.sh) is currently in progress. Waiting...")
             else:
-                log.error("Failed to upload startup script. Will retry next check.")
+                log.info(f"GCP Online but bots are not running (anihub: {anihub_running}, renamer: {renamer_running}). Executing startup commands...")
+                uploaded = await upload_startup_script()
+                if uploaded:
+                    await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 &", timeout=30)
+                    startup_running = True
+                else:
+                    log.error("Failed to upload startup script. Will retry next check.")
         else:
             # Both are already running
             startup_running = True
