@@ -16,6 +16,7 @@ Features:
 
 import asyncio
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -98,25 +99,40 @@ def save_startup_commands(commands: str):
 #  CORE GCP EXECUTION HELPERS
 # ─────────────────────────────────────────────
 async def run_on_gcp(cmd: str, timeout: int = 60) -> str:
-    """Runs a single command on GCP Cloud Shell via gcloud SSH and returns output."""
+    """Runs a command on GCP Cloud Shell via gcloud SSH, with Process Group isolation to prevent locks."""
     gcloud_cmd = [
         "gcloud", "cloud-shell", "ssh",
         "--authorize-session",
         f"--command={cmd}",
         "--quiet",
     ]
+    
+    # Use preexec_fn=os.setsid to assign a unique process group ID (PGID) to this execution.
+    # On Windows, we omit this as os.setsid is not supported.
+    kwargs = {}
+    if os.name != "nt":
+        kwargs["preexec_fn"] = os.setsid
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *gcloud_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **kwargs
         )
         try:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
             )
         except asyncio.TimeoutError:
-            proc.kill()
+            # Force-kill the entire process group (parent + child ssh tunnels) to release loops immediately
+            if os.name != "nt":
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                proc.kill()
             return f"⏱ Command timed out after {timeout}s."
 
         output = stdout.decode("utf-8", errors="replace").strip()
@@ -133,18 +149,24 @@ async def run_on_gcp(cmd: str, timeout: int = 60) -> str:
         return f"❌ Exception: {e}"
 
 async def upload_startup_script() -> bool:
-    """Uploads the startup script to GCP Cloud Shell via gcloud SCP with timeout and logs."""
+    """Uploads the startup script to GCP Cloud Shell via gcloud SCP, isolated under setsid group."""
     scp_cmd = [
         "gcloud", "cloud-shell", "scp",
         f"localhost:{STARTUP_FILE}",
         "cloudshell:~/startup.sh",
         "--quiet"
     ]
+    
+    kwargs = {}
+    if os.name != "nt":
+        kwargs["preexec_fn"] = os.setsid
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *scp_cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            **kwargs
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -159,7 +181,13 @@ async def upload_startup_script() -> bool:
                 log.error(f"[SCP] Failed to upload. Exit code {proc.returncode}. Out: {out} | Err: {err}")
                 return False
         except asyncio.TimeoutError:
-            proc.kill()
+            if os.name != "nt":
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                proc.kill()
             log.error("[SCP] Command timed out after 30s.")
             return False
     except Exception as e:
