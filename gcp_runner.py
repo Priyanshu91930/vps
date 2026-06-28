@@ -68,12 +68,9 @@ app = None              # Will be initialized inside main()
 
 # Default startup commands requested by the user
 DEFAULT_STARTUP = (
-    "docker rm -f anihubfilter_bot\n"
-    "cd ~/anihubfilter\n"
-    "git pull\n"
-    "docker build -t anihubfilter .\n"
-    "docker run -d --name anihubfilter_bot anihubfilter\n"
-    "docker logs --tail 100 anihubfilter_bot"
+    "if [ ! -d \"$HOME/anihubfilter\" ]; then git clone https://github.com/Priyanshu91930/anihubfilter.git \"$HOME/anihubfilter\"; fi && "
+    "cd \"$HOME/anihubfilter\" && git pull && pip3 install --user -r requirements.txt && pkill -f \"anihubfilter\" || true && "
+    "nohup python3 -c \"import os, sys; os.chdir(os.path.expanduser('~/anihubfilter')); sys.path.insert(0, os.getcwd()); import bot\" > ~/anihubfilter.log 2>&1 &"
 )
 
 # ─────────────────────────────────────────────
@@ -333,7 +330,7 @@ async def cmd_specs(_, msg: Message):
     await wait_msg.edit_text(report)
 
 async def cmd_bots(_, msg: Message):
-    wait_msg = await msg.reply_text("🤖 Scanning active Python/Docker containers...")
+    wait_msg = await msg.reply_text("🤖 Scanning active Python processes...")
     
     # Active python files on VPS
     try:
@@ -343,22 +340,18 @@ async def cmd_bots(_, msg: Message):
     except Exception as e:
         vps_report = f"Error scanning VPS: {e}"
 
-    # Active containers/python files on GCP
+    # Active python processes on GCP
     gcp_alive = await check_gcp_alive()
     if gcp_alive:
-        gcp_docker = await run_on_gcp("docker ps", timeout=15)
         gcp_procs = await run_on_gcp("ps -ef | grep python3", timeout=15)
         gcp_list = [line.strip() for line in gcp_procs.split('\n') if "grep" not in line and line.strip()]
         gcp_report = "\n".join(gcp_list) if gcp_list else "No active python scripts."
     else:
-        gcp_docker = "GCP Offline"
         gcp_report = "GCP Offline"
 
     report = (
         "🖥️ **Active VPS Python Processes:**\n"
         f"```\n{vps_report}\n```\n"
-        "☁️ **GCP Active Docker Containers:**\n"
-        f"```\n{gcp_docker}\n```\n"
         "☁️ **GCP Active Python Processes:**\n"
         f"```\n{gcp_report}\n```"
     )
@@ -375,10 +368,9 @@ async def cmd_ls(_, msg: Message):
     await wait_msg.edit_text(f"**📂 GCP Home Directory:**\n```\n{output}\n```")
 
 async def cmd_kill(_, msg: Message):
-    wait_msg = await msg.reply_text("🔴 Stopping Docker containers & killing Python scripts on GCP...")
-    docker_kill = await run_on_gcp("docker stop $(docker ps -a -q) &>/dev/null; docker rm $(docker ps -a -q) &>/dev/null", timeout=30)
-    pkill = await run_on_gcp("pkill -f python3; echo 'Done'", timeout=30)
-    await wait_msg.edit_text(f"🔴 **Stop Result:**\nContainers stopped.\nPython processes killed:\n```\n{pkill}\n```")
+    wait_msg = await msg.reply_text("🔴 Stopping Python bots on GCP...")
+    pkill = await run_on_gcp("pkill -f anihubfilter; pkill -f renamer2gb; echo 'Done'", timeout=30)
+    await wait_msg.edit_text(f"🔴 **Stop Result:**\nPython processes killed:\n```\n{pkill}\n```")
 
 async def cmd_viewstartup(_, msg: Message):
     cmds = load_startup_commands()
@@ -441,15 +433,24 @@ async def startup_daemon(client: Client):
             await asyncio.sleep(15)
             continue
         
-        if alive and not startup_running:
-            gcp_connected = True
-            log.info("GCP Online. Executing startup commands...")
+        gcp_connected = True
+        
+        # Check if our Python processes are running on GCP
+        running_processes = await run_on_gcp("ps -ef | grep python3", timeout=20)
+        anihub_running = "anihubfilter" in running_processes
+        renamer_running = "renamer2gb" in running_processes
+        
+        if not (anihub_running and renamer_running):
+            log.info(f"GCP Online but bots are not running (anihub: {anihub_running}, renamer: {renamer_running}). Executing startup commands...")
             uploaded = await upload_startup_script()
             if uploaded:
                 await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 &", timeout=30)
                 startup_running = True
             else:
                 log.error("Failed to upload startup script. Will retry next check.")
+        else:
+            # Both are already running
+            startup_running = True
         
         await asyncio.sleep(HEARTBEAT_INTERVAL)
 
