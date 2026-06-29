@@ -204,6 +204,55 @@ async def is_gcloud_logged_in() -> bool:
     except Exception:
         return False
 
+async def get_gcloud_accounts() -> list[str]:
+    """Gets a list of all logged-in gcloud accounts on the VPS."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gcloud", "auth", "list", "--format=value(account)",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        accounts = [line.strip() for line in stdout.decode().split("\n") if line.strip()]
+        return accounts
+    except Exception:
+        return []
+
+async def rotate_gcloud_account() -> bool:
+    """Rotates to the next logged-in gcloud account in the list."""
+    accounts = await get_gcloud_accounts()
+    if len(accounts) <= 1:
+        return False
+        
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gcloud", "config", "get-value", "account",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        active = stdout.decode().strip()
+        
+        if active in accounts:
+            current_idx = accounts.index(active)
+            next_idx = (current_idx + 1) % len(accounts)
+        else:
+            next_idx = 0
+            
+        next_account = accounts[next_idx]
+        log.info(f"🔄 Rotating gcloud account from {active} to {next_account}")
+        
+        proc_switch = await asyncio.create_subprocess_exec(
+            "gcloud", "config", "set", "account", next_account,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc_switch.communicate()
+        return True
+    except Exception as e:
+        log.error(f"Error during gcloud account rotation: {e}")
+        return False
+
 async def check_gcp_alive() -> bool:
     """Probe to check if GCP is responsive."""
     result = await run_on_gcp("echo __alive__", timeout=20)
@@ -438,6 +487,7 @@ async def startup_daemon(client: Client):
     log.info("Startup Daemon task started.")
     await asyncio.sleep(5) 
 
+    retry_count = 0
     while True:
         alive = await check_gcp_alive()
         if not alive:
@@ -445,11 +495,25 @@ async def startup_daemon(client: Client):
             startup_running = False
             err_check = await run_on_gcp("echo __alive__", timeout=30)
             log.info(f"GCP Offline. Connection check output/error: {err_check}")
+            
+            quota_exceeded = any(word in err_check.lower() for word in ["limit", "exceeded", "quota"])
+            
+            if quota_exceeded or retry_count >= 3:
+                log.warning(f"⚠️ GCP connection issue detected (quota: {quota_exceeded}, retries: {retry_count}). Attempting account rotation...")
+                rotated = await rotate_gcloud_account()
+                if rotated:
+                    retry_count = 0
+                    await send_alert(client, "🔄 **GCP Cloud Shell Connection Failed/Quota Exceeded!**\nAutomatically switching to the next Google account in the pool...")
+                    await asyncio.sleep(10)
+                    continue
+            
+            retry_count += 1
             log.info("Attempting to wake it up...")
             await run_on_gcp("echo waking_up", timeout=90)
             await asyncio.sleep(15)
             continue
         
+        retry_count = 0
         gcp_connected = True
         
         # Check if our processes are running on GCP
