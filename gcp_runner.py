@@ -191,6 +191,19 @@ async def upload_startup_script() -> bool:
         log.error(f"[SCP] Exception during upload: {e}")
         return False
 
+async def is_gcloud_logged_in() -> bool:
+    """Checks if gcloud is authenticated on the VPS."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gcloud", "auth", "list", "--format=value(account)",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        return bool(stdout.decode().strip())
+    except Exception:
+        return False
+
 async def check_gcp_alive() -> bool:
     """Probe to check if GCP is responsive."""
     result = await run_on_gcp("echo __alive__", timeout=20)
@@ -268,7 +281,11 @@ async def cmd_connect(_, msg: Message):
         await wait_msg.edit_text("✅ **Connected to GCP Cloud Shell!**\nSend any command to run it on the shell.")
     else:
         gcp_connected = False
-        await wait_msg.edit_text("❌ Could not connect to GCP Cloud Shell.\nMake sure `gcloud auth login` was done on this VPS.")
+        logged_in = await is_gcloud_logged_in()
+        if logged_in:
+            await wait_msg.edit_text("⚡ **GCP Cloud Shell is offline or starting up.**\nGoogle is booting your Cloud Shell session. Please wait 1-2 minutes and try `/connect` again.")
+        else:
+            await wait_msg.edit_text("❌ **GCP Connection Failed.**\nYour login credentials on the VPS have expired. Please run `gcloud auth login` on the VPS terminal to re-authenticate.")
 
 async def cmd_status(_, msg: Message):
     global gcp_connected, startup_running
