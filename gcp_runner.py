@@ -258,6 +258,20 @@ async def rotate_gcloud_account() -> bool:
         log.error(f"Error during gcloud account rotation: {e}")
         return False
 
+async def get_active_account() -> str:
+    """Gets the currently active gcloud account email on the VPS."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gcloud", "config", "get-value", "account",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode().strip()
+    except Exception:
+        return ""
+
+
 async def check_gcp_alive() -> bool:
     """Probe to check if GCP is responsive."""
     result = await run_on_gcp("echo __alive__", timeout=20)
@@ -512,9 +526,43 @@ async def cmd_ls(_, msg: Message):
     await wait_msg.edit_text(f"**📂 GCP Home Directory:**\n```\n{output}\n```")
 
 async def cmd_kill(_, msg: Message):
-    wait_msg = await msg.reply_text("🔴 Stopping Python bots on GCP...")
-    pkill = await run_on_gcp("pkill -f anihubfilter; pkill -f renamer2gb; echo 'Done'", timeout=30)
-    await wait_msg.edit_text(f"🔴 **Stop Result:**\nPython processes killed:\n```\n{pkill}\n```")
+    wait_msg = await msg.reply_text("🔴 Stopping Python bots across ALL GCP accounts in the pool...")
+    
+    accounts = await get_gcloud_accounts()
+    if not accounts:
+        await wait_msg.edit_text("❌ No logged-in accounts found in the pool.")
+        return
+        
+    original_account = await get_active_account()
+    results = []
+    
+    for acc in accounts:
+        try:
+            proc_switch = await asyncio.create_subprocess_exec(
+                "gcloud", "config", "set", "account", acc,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc_switch.communicate()
+            
+            pkill_res = await run_on_gcp("pkill -f anihubfilter; pkill -f renamer2gb; pkill -f stealbot_bot; echo 'Done'", timeout=25)
+            results.append(f"• `{acc}`: {pkill_res.strip()}")
+        except Exception as e:
+            results.append(f"• `{acc}`: Failed to switch/kill ({e})")
+            
+    if original_account:
+        try:
+            proc_restore = await asyncio.create_subprocess_exec(
+                "gcloud", "config", "set", "account", original_account,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc_restore.communicate()
+        except:
+            pass
+            
+    report = "🔴 **Bots stopped on all GCP accounts:**\n\n" + "\n".join(results)
+    await wait_msg.edit_text(report)
 
 async def cmd_viewstartup(_, msg: Message):
     cmds = load_startup_commands()
