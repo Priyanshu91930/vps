@@ -547,6 +547,9 @@ async def cmd_kill(_, msg: Message):
             
             pkill_res = await run_on_gcp("pkill -f anihubfilter; pkill -f renamer2gb; pkill -f stealbot_bot; echo 'Done'", timeout=25)
             results.append(f"• `{acc}`: {pkill_res.strip()}")
+            
+            # Sleep 5 seconds to avoid SSH tunnel overlap and rate limiting
+            await asyncio.sleep(5)
         except Exception as e:
             results.append(f"• `{acc}`: Failed to switch/kill ({e})")
             
