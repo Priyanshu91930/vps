@@ -71,6 +71,9 @@ auth_process = None
 waiting_for_auth_code = False
 auth_msg_to_reply = None
 
+# Global state for controlling daemons
+daemons_active = True
+
 # Default startup commands requested by the user
 DEFAULT_STARTUP = (
     "if [ ! -d \"$HOME/anihubfilter\" ]; then git clone https://github.com/Priyanshu91930/anihubfilter.git \"$HOME/anihubfilter\"; fi && "
@@ -567,6 +570,18 @@ async def cmd_kill(_, msg: Message):
     report = "🔴 **Bots stopped on all GCP accounts:**\n\n" + "\n".join(results)
     await wait_msg.edit_text(report)
 
+async def cmd_stop(_, msg: Message):
+    global daemons_active, gcp_connected, startup_running
+    daemons_active = False
+    gcp_connected = False
+    startup_running = False
+    await msg.reply_text("🛑 **Daemon tasks suspended.**\nAll background keepalive and startup checks are stopped. GCP instances will shut down automatically in 20 minutes.")
+
+async def cmd_resume(_, msg: Message):
+    global daemons_active
+    daemons_active = True
+    await msg.reply_text("▶️ **Daemon tasks resumed.**\nBackground keepalive and startup checks are active again.")
+
 async def cmd_viewstartup(_, msg: Message):
     cmds = load_startup_commands()
     await msg.reply_text(
@@ -646,6 +661,9 @@ async def startup_daemon(client: Client):
 
     retry_count = 0
     while True:
+        if not daemons_active:
+            await asyncio.sleep(5)
+            continue
         alive = await check_gcp_alive()
         if not alive:
             gcp_connected = False
@@ -710,6 +728,8 @@ async def keepalive_daemon(client: Client):
     log.info("Keepalive Daemon task started.")
     while True:
         await asyncio.sleep(KEEPALIVE_INTERVAL)
+        if not daemons_active:
+            continue
         if gcp_connected:
             log.info("Sending keep-alive ping to GCP Cloud Shell...")
             await run_on_gcp("echo keepalive > /dev/null", timeout=15)
@@ -767,12 +787,14 @@ async def main():
     app.add_handler(MessageHandler(cmd_setstartup, filters.command("setstartup") & filters.user(ADMIN)))
     app.add_handler(MessageHandler(cmd_runstartup, filters.command("runstartup") & filters.user(ADMIN)))
     app.add_handler(MessageHandler(cmd_addaccount, filters.command("addaccount") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_stop, filters.command("stop") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_resume, filters.command("resume") & filters.user(ADMIN)))
     
     # terminal filter (all other text from owner)
     app.add_handler(MessageHandler(
         terminal, 
         filters.text & filters.user(ADMIN) & ~filters.command(
-            ["start", "help", "connect", "status", "specs", "bots", "storage", "ls", "kill", "viewstartup", "setstartup", "runstartup", "addaccount"]
+            ["start", "help", "connect", "status", "specs", "bots", "storage", "ls", "kill", "viewstartup", "setstartup", "runstartup", "addaccount", "stop", "resume"]
         )
     ))
 
