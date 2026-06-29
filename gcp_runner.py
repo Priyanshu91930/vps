@@ -66,6 +66,11 @@ gcp_connected = False   # whether GCP Cloud Shell is connected
 startup_running = False # whether startup script is executing/active
 app = None              # Will be initialized inside main()
 
+# Global state for interactive auth
+auth_process = None
+waiting_for_auth_code = False
+auth_msg_to_reply = None
+
 # Default startup commands requested by the user
 DEFAULT_STARTUP = (
     "if [ ! -d \"$HOME/anihubfilter\" ]; then git clone https://github.com/Priyanshu91930/anihubfilter.git \"$HOME/anihubfilter\"; fi && "
@@ -334,7 +339,7 @@ async def cmd_connect(_, msg: Message):
         if logged_in:
             await wait_msg.edit_text("⚡ **GCP Cloud Shell is offline or starting up.**\nGoogle is booting your Cloud Shell session. Please wait 1-2 minutes and try `/connect` again.")
         else:
-            await wait_msg.edit_text("❌ **GCP Connection Failed.**\nYour login credentials on the VPS have expired. Please run `gcloud auth login` on the VPS terminal to re-authenticate.")
+            await wait_msg.edit_text("❌ **GCP Connection Failed.**\nYour login credentials on the VPS have expired. Please run `/addaccount` on this bot to login again.")
 
 async def cmd_status(_, msg: Message):
     global gcp_connected, startup_running
@@ -344,12 +349,85 @@ async def cmd_status(_, msg: Message):
     emoji = "✅" if alive else "❌"
     status = "Connected" if alive else "Disconnected / Timed Out"
     startup_status = "Active/Running" if startup_running else "Inactive/Stopped"
+    
+    # Get active account and all accounts
+    accounts = await get_gcloud_accounts()
+    active_account = "None"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gcloud", "config", "get-value", "account",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        active_account = stdout.decode().strip() or "None"
+    except Exception:
+        pass
+
+    accounts_str = "\n".join([f"• `{acc}`" + (" ⭐ (Active)" if acc == active_account else "") for acc in accounts]) or "No logged-in accounts"
+
     await wait_msg.edit_text(
         f"**GCP Cloud Shell Status**\n\n"
         f"{emoji} Status: `{status}`\n"
         f"⚡ Auto-startup container state: `{startup_status}`\n"
-        f"🕒 Checked at: `{time.strftime('%H:%M:%S')}`"
+        f"🕒 Checked at: `{time.strftime('%H:%M:%S')}`\n\n"
+        f"👤 **GCP Accounts Pool ({len(accounts)}):**\n"
+        f"{accounts_str}"
     )
+
+async def cmd_addaccount(_, msg: Message):
+    global auth_process, waiting_for_auth_code, auth_msg_to_reply
+    if auth_process is not None:
+        await msg.reply_text("⚠️ An authentication process is already running. Please reply with the code first, or wait.")
+        return
+        
+    wait_msg = await msg.reply_text("🔑 Initiating Google Cloud login process...")
+    try:
+        auth_process = await asyncio.create_subprocess_exec(
+            "gcloud", "auth", "login", "--no-launch-browser",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        url = None
+        for _ in range(10):
+            line = await auth_process.stderr.readline()
+            line_str = line.decode(errors="replace").strip()
+            log.info(f"[GCLOUD AUTH] {line_str}")
+            if "https://" in line_str:
+                for word in line_str.split():
+                    if word.startswith("https://"):
+                        url = word
+                        break
+            if url:
+                break
+                
+        if url:
+            waiting_for_auth_code = True
+            auth_msg_to_reply = wait_msg
+            await wait_msg.edit_text(
+                "🔑 **Google Cloud Authentication**\n\n"
+                "1. Click the link below and sign in with your Google account:\n"
+                f"🔗 {url}\n\n"
+                "2. Copy the authorization code and **reply directly to this message** with the code."
+            )
+        else:
+            await wait_msg.edit_text("❌ Could not retrieve authentication URL. Please check VPS logs.")
+            try:
+                auth_process.kill()
+            except:
+                pass
+            auth_process = None
+            
+    except Exception as e:
+        await wait_msg.edit_text(f"❌ Exception starting auth: {e}")
+        if auth_process:
+            try:
+                auth_process.kill()
+            except:
+                pass
+            auth_process = None
 
 async def cmd_specs(_, msg: Message):
     wait_msg = await msg.reply_text("📊 Gathering specifications (VPS & GCP) + running speed tests...")
@@ -465,6 +543,34 @@ async def cmd_runstartup(_, msg: Message):
     await wait_msg.edit_text(f"✅ **Startup Launched:**\n`{output}`\nCheck log output anytime by typing `cat ~/startup.log`.")
 
 async def terminal(_, msg: Message):
+    global auth_process, waiting_for_auth_code, auth_msg_to_reply
+    
+    # Check if we are waiting for auth code
+    if waiting_for_auth_code and auth_process is not None:
+        code = msg.text.strip()
+        status_msg = await msg.reply_text("⏳ Sending authorization code to gcloud...")
+        try:
+            auth_process.stdin.write(f"{code}\n".encode())
+            await auth_process.stdin.drain()
+            
+            stdout_data, stderr_data = await auth_process.communicate()
+            out = stdout_data.decode(errors="replace").strip()
+            err = stderr_data.decode(errors="replace").strip()
+            
+            if auth_process.returncode == 0:
+                accounts = await get_gcloud_accounts()
+                new_acc = accounts[-1] if accounts else "Unknown Account"
+                await status_msg.edit_text(f"✅ **Authentication Successful!**\nAdded account: `{new_acc}`")
+            else:
+                await status_msg.edit_text(f"❌ **Authentication Failed!**\nError:\n```\n{out}\n{err}\n```")
+        except Exception as e:
+            await status_msg.edit_text(f"❌ Exception during auth completion: {e}")
+        finally:
+            waiting_for_auth_code = False
+            auth_process = None
+            auth_msg_to_reply = None
+        return
+
     user_cmd = msg.text.strip()
     if not user_cmd:
         return
@@ -602,12 +708,13 @@ async def main():
     app.add_handler(MessageHandler(cmd_viewstartup, filters.command("viewstartup") & filters.user(ADMIN)))
     app.add_handler(MessageHandler(cmd_setstartup, filters.command("setstartup") & filters.user(ADMIN)))
     app.add_handler(MessageHandler(cmd_runstartup, filters.command("runstartup") & filters.user(ADMIN)))
+    app.add_handler(MessageHandler(cmd_addaccount, filters.command("addaccount") & filters.user(ADMIN)))
     
     # terminal filter (all other text from owner)
     app.add_handler(MessageHandler(
         terminal, 
         filters.text & filters.user(ADMIN) & ~filters.command(
-            ["start", "help", "connect", "status", "specs", "bots", "storage", "ls", "kill", "viewstartup", "setstartup", "runstartup"]
+            ["start", "help", "connect", "status", "specs", "bots", "storage", "ls", "kill", "viewstartup", "setstartup", "runstartup", "addaccount"]
         )
     ))
 
