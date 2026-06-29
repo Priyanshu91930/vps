@@ -654,6 +654,13 @@ async def startup_daemon(client: Client):
             
             if quota_exceeded or retry_count >= 3:
                 log.warning(f"⚠️ GCP connection issue detected (quota: {quota_exceeded}, retries: {retry_count}). Attempting account rotation...")
+                
+                # Kill bots on the CURRENT active account before rotating!
+                try:
+                    await run_on_gcp("pkill -f anihubfilter; pkill -f renamer2gb; pkill -f stealbot_bot", timeout=15)
+                except Exception as e:
+                    log.error(f"Failed to kill bots on current account before rotating: {e}")
+
                 rotated = await rotate_gcloud_account()
                 if rotated:
                     retry_count = 0
