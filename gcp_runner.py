@@ -31,8 +31,8 @@ from pyrogram.handlers import MessageHandler
 # ─────────────────────────────────────────────
 API_ID    = int(os.environ.get("API_ID",    "27686895"))
 API_HASH  = os.environ.get("API_HASH",       "0e996bd3891969ec5dfebf8bb3e39e94")
-BOT_TOKEN = os.environ.get("BOT_TOKEN",      "8615130694:AAF5Y29rp3_pmtHj5dgqS4picI03Kx6Uvxo")
-ADMIN_RAW = os.environ.get("ADMIN", "1246987713")
+BOT_TOKEN = os.environ.get("BOT_TOKEN",      "8936898019:AAG5eI2Emv1eWNcoZc2PZELVMZFyLx0ZuhA")
+ADMIN_RAW = os.environ.get("ADMIN", "8494193109")
 try:
     ADMIN = int(ADMIN_RAW)
 except ValueError:

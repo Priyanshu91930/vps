@@ -5,7 +5,7 @@ app = Client(
     "test_pyro_session",
     api_id=27686895,
     api_hash="0e996bd3891969ec5dfebf8bb3e39e94",
-    bot_token="8615130694:AAF5Y29rp3_pmtHj5dgqS4picI03Kx6Uvxo"
+    bot_token="8936898019:AAG5eI2Emv1eWNcoZc2PZELVMZFyLx0ZuhA"
 )
 
 @app.on_message()
