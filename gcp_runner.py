@@ -698,18 +698,24 @@ async def startup_daemon(client: Client):
         retry_count = 0
         gcp_connected = True
         
+        # Check which bots are actually configured in the startup commands
+        startup_cmds = load_startup_commands()
+        anihub_needed = "anihubfilter" in startup_cmds
+        stealbot_needed = "stealbot_bot" in startup_cmds or "stealbot" in startup_cmds
+        mirror_needed = "mirror-leech" in startup_cmds or "mirror" in startup_cmds
+
         # Check if our processes are running on GCP
         running_processes = await run_on_gcp("ps -ef", timeout=20)
-        anihub_running = "anihubfilter" in running_processes
-        stealbot_running = "stealbot_bot" in running_processes
-        mirror_running = "mirror-leech" in running_processes
+        anihub_running = not anihub_needed or "anihubfilter" in running_processes
+        stealbot_running = not stealbot_needed or "stealbot" in running_processes
+        mirror_running = not mirror_needed or "mirror-leech" in running_processes or "mirror" in running_processes
         setup_running = "pip3" in running_processes or "startup.sh" in running_processes
         
         if not (anihub_running and stealbot_running and mirror_running):
             if setup_running:
                 log.info("GCP Online. Bots are not running yet, but setup/installation (pip3/startup.sh) is currently in progress. Waiting...")
             else:
-                log.info(f"GCP Online but bots are not running (anihub: {anihub_running}, stealbot: {stealbot_running}, mirror: {mirror_running}). Executing startup commands...")
+                log.info(f"GCP Online but bots are not running (anihub required: {anihub_needed}, running: {anihub_running} | stealbot required: {stealbot_needed}, running: {stealbot_running} | mirror required: {mirror_needed}, running: {mirror_running}). Executing startup commands...")
                 uploaded = await upload_startup_script()
                 if uploaded:
                     await run_on_gcp("chmod +x ~/startup.sh && nohup bash ~/startup.sh < /dev/null > ~/startup.log 2>&1 &", timeout=30)
@@ -717,7 +723,7 @@ async def startup_daemon(client: Client):
                 else:
                     log.error("Failed to upload startup script. Will retry next check.")
         else:
-            # All are already running
+            # All configured bots are already running
             startup_running = True
         
         await asyncio.sleep(HEARTBEAT_INTERVAL)
@@ -801,13 +807,6 @@ async def main():
 
     try:
         async with app:
-            log.info("Clearing active webhook if any...")
-            try:
-                await app.delete_webhook()
-                log.info("Webhook cleared successfully!")
-            except Exception as e:
-                log.warning(f"Could not clear webhook: {e}")
-
             log.info("Starting background tasks...")
             # Start all tasks in background
             asyncio.create_task(startup_daemon(app))
