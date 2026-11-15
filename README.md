@@ -15,7 +15,17 @@ Control your **Google Cloud Shell** like a terminal — directly from Telegram!
 
 ### Step 1: Install dependencies
 ```bash
-pip install pyrogram tgcrypto
+pip install -r requirements.txt
+```
+*(Or `pip install pyrogram tgcrypto python-dotenv`)*
+
+### Step 2: Configure Environment (`.env`)
+Create a `.env` file with your credentials:
+```env
+API_ID=your_api_id
+API_HASH=your_api_hash
+BOT_TOKEN=your_bot_token
+ADMIN=your_telegram_user_id
 ```
 
 ### Step 2: Install Google Cloud SDK

@@ -1,0 +1,6 @@
+.env
+*.session
+*.session-journal
+__pycache__/
+*.log
+startup_commands.txt

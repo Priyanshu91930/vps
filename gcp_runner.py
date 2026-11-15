@@ -26,15 +26,35 @@ from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 from pyrogram.handlers import MessageHandler
 
+# Load environment variables from .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Fallback parser if python-dotenv is not installed
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path, "r", encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                _k, _v = _k.strip(), _v.strip().strip('"').strip("'")
+                if _k not in os.environ:
+                    os.environ[_k] = _v
+
 # ─────────────────────────────────────────────
 #  CONFIGURATION
 # ─────────────────────────────────────────────
-API_ID    = int(os.environ.get("API_ID",    "27686895"))
-API_HASH  = os.environ.get("API_HASH",       "0e996bd3891969ec5dfebf8bb3e39e94")
-BOT_TOKEN = os.environ.get("BOT_TOKEN",      "8936898019:AAG5eI2Emv1eWNcoZc2PZELVMZFyLx0ZuhA")
-ADMIN_RAW = os.environ.get("ADMIN", "8494193109")
+API_ID_RAW = os.environ.get("API_ID")
+API_ID    = int(API_ID_RAW) if API_ID_RAW else None
+API_HASH  = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_RAW = os.environ.get("ADMIN")
 try:
-    ADMIN = int(ADMIN_RAW)
+    ADMIN = int(ADMIN_RAW) if ADMIN_RAW else None
 except ValueError:
     ADMIN = ADMIN_RAW
 
@@ -768,6 +788,11 @@ async def heartbeat_alert_daemon(client: Client):
 # ─────────────────────────────────────────────
 async def main():
     global app
+    if not all([API_ID, API_HASH, BOT_TOKEN, ADMIN]):
+        missing = [k for k, v in [("API_ID", API_ID), ("API_HASH", API_HASH), ("BOT_TOKEN", BOT_TOKEN), ("ADMIN", ADMIN)] if not v]
+        log.error(f"❌ Missing required configuration in .env: {', '.join(missing)}")
+        sys.exit(1)
+
     load_startup_commands()
 
     # Initialize client dynamically within the active asyncio event loop
