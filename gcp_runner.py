@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 import logging
+import shutil
 import urllib.request
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message
@@ -57,6 +58,26 @@ try:
     ADMIN = int(ADMIN_RAW) if ADMIN_RAW else None
 except ValueError:
     ADMIN = ADMIN_RAW
+
+def get_gcloud_bin() -> str:
+    """Finds the gcloud executable across common system and user directories."""
+    found = shutil.which("gcloud")
+    if found:
+        return found
+    candidates = [
+        "/usr/bin/gcloud",
+        "/usr/local/bin/gcloud",
+        "/snap/bin/gcloud",
+        os.path.expanduser("~/google-cloud-sdk/bin/gcloud"),
+        "/root/google-cloud-sdk/bin/gcloud",
+        "/opt/google-cloud-sdk/bin/gcloud"
+    ]
+    for path in candidates:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return "gcloud"
+
+GCLOUD_BIN = get_gcloud_bin()
 
 # Path to store startup commands on the VPS
 STARTUP_FILE = os.path.abspath("startup_commands.txt")
@@ -126,7 +147,7 @@ def save_startup_commands(commands: str):
 async def run_on_gcp(cmd: str, timeout: int = 60) -> str:
     """Runs a command on GCP Cloud Shell via gcloud SSH, with Process Group isolation to prevent locks."""
     gcloud_cmd = [
-        "gcloud", "cloud-shell", "ssh",
+        GCLOUD_BIN, "cloud-shell", "ssh",
         "--authorize-session",
         f"--command={cmd}",
         "--quiet",
@@ -169,14 +190,14 @@ async def run_on_gcp(cmd: str, timeout: int = 60) -> str:
         return output or error or "(no output)"
 
     except FileNotFoundError:
-        return "❌ `gcloud` not found. Please install Google Cloud SDK on this VPS."
+        return f"❌ `gcloud` binary not found (looked for `{GCLOUD_BIN}`). Please install Google Cloud SDK on this VPS."
     except Exception as e:
         return f"❌ Exception: {e}"
 
 async def upload_startup_script() -> bool:
     """Uploads the startup script to GCP Cloud Shell via gcloud SCP, isolated under setsid group."""
     scp_cmd = [
-        "gcloud", "cloud-shell", "scp",
+        GCLOUD_BIN, "cloud-shell", "scp",
         f"localhost:{STARTUP_FILE}",
         "cloudshell:~/startup.sh",
         "--quiet"
@@ -223,7 +244,7 @@ async def is_gcloud_logged_in() -> bool:
     """Checks if gcloud is authenticated on the VPS."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gcloud", "auth", "list", "--format=value(account)",
+            GCLOUD_BIN, "auth", "list", "--format=value(account)",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -236,7 +257,7 @@ async def get_gcloud_accounts() -> list[str]:
     """Gets a list of all logged-in gcloud accounts on the VPS."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gcloud", "auth", "list", "--format=value(account)",
+            GCLOUD_BIN, "auth", "list", "--format=value(account)",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -254,7 +275,7 @@ async def rotate_gcloud_account() -> bool:
         
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gcloud", "config", "get-value", "account",
+            GCLOUD_BIN, "config", "get-value", "account",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -271,7 +292,7 @@ async def rotate_gcloud_account() -> bool:
         log.info(f"🔄 Rotating gcloud account from {active} to {next_account}")
         
         proc_switch = await asyncio.create_subprocess_exec(
-            "gcloud", "config", "set", "account", next_account,
+            GCLOUD_BIN, "config", "set", "account", next_account,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -285,7 +306,7 @@ async def get_active_account() -> str:
     """Gets the currently active gcloud account email on the VPS."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gcloud", "config", "get-value", "account",
+            GCLOUD_BIN, "config", "get-value", "account",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -392,7 +413,7 @@ async def cmd_status(_, msg: Message):
     active_account = "None"
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gcloud", "config", "get-value", "account",
+            GCLOUD_BIN, "config", "get-value", "account",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -421,7 +442,7 @@ async def cmd_addaccount(_, msg: Message):
     wait_msg = await msg.reply_text("🔑 Initiating Google Cloud login process...")
     try:
         auth_process = await asyncio.create_subprocess_exec(
-            "gcloud", "auth", "login", "--no-launch-browser",
+            GCLOUD_BIN, "auth", "login", "--no-launch-browser",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
@@ -562,7 +583,7 @@ async def cmd_kill(_, msg: Message):
     for acc in accounts:
         try:
             proc_switch = await asyncio.create_subprocess_exec(
-                "gcloud", "config", "set", "account", acc,
+                GCLOUD_BIN, "config", "set", "account", acc,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -579,7 +600,7 @@ async def cmd_kill(_, msg: Message):
     if original_account:
         try:
             proc_restore = await asyncio.create_subprocess_exec(
-                "gcloud", "config", "set", "account", original_account,
+                GCLOUD_BIN, "config", "set", "account", original_account,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
