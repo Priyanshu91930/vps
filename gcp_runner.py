@@ -22,6 +22,9 @@ import sys
 import time
 import logging
 import shutil
+import threading
+import http.server
+import socketserver
 import urllib.request
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message
@@ -804,11 +807,35 @@ async def heartbeat_alert_daemon(client: Client):
             await send_alert(client, "❌ **GCP Cloud Shell connection dropped (12-hour reset or network drop).** Auto-reconnecting...")
             prev_state = False
 
+def start_health_server():
+    """Starts a minimal HTTP healthcheck server on $PORT if deployed on Railway/Render/Cloud."""
+    port_str = os.environ.get("PORT")
+    if not port_str:
+        return
+    try:
+        port = int(port_str)
+        class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"OK")
+            def log_message(self, format, *args):
+                pass  # suppress access log spam
+
+        httpd = socketserver.TCPServer(("", port), HealthCheckHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        log.info(f"🌐 Healthcheck server started on port {port} (Railway/Cloud mode)")
+    except Exception as e:
+        log.warning(f"Could not start healthcheck server on port {port_str}: {e}")
+
 # ─────────────────────────────────────────────
 #  MAIN ENTRY POINT
 # ─────────────────────────────────────────────
 async def main():
     global app
+    start_health_server()
     if not all([API_ID, API_HASH, BOT_TOKEN, ADMIN]):
         missing = [k for k, v in [("API_ID", API_ID), ("API_HASH", API_HASH), ("BOT_TOKEN", BOT_TOKEN), ("ADMIN", ADMIN)] if not v]
         log.error(f"❌ Missing required configuration in .env: {', '.join(missing)}")
